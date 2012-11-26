@@ -3,65 +3,7 @@ import random
 from astro.cosmology import Cosmology,PC,to_xyz
 import pylab as pl
 
-def extra_dv(sigma,hole,size=1):
-    """Is the extra delta velocity chosen randomly from a given
-    distribution (Gaussian with a hole).
-    
-    Input parameters:
-    ---
-    sigma:   sigma of the Gaussian
-    hole:    size of the hole
-    size:    number of random points.
-    
-    """
-    from astro.sampledist import RanDist
-    #Gaussian with a hole
-    mu       = 0
-    x        = np.linspace(-4*sigma, +4*sigma, 1e4)
-    dist     = (1.0/(sigma*np.sqrt(2*np.pi)))*np.exp(-(x-mu)**2/(2.0*sigma**2))
-    dist     = np.where(np.fabs(x)<hole,0,dist) # Gaussian with a hole
-    rand_z   = RanDist(x,dist)
-    return rand_z.random(size)
-
-def random_abs_old(absreal,Nrand):
-    """From a real absorber catalog it creates a random catalog.  For a
-    given real absorber with (z_obs,logN_obs,b_obs) it places it at a
-    new z_rand uniformly distributed between the
-
-    zmin = minimun z where a line with logN<logN_obs, and,
-    zmax = maximun z where a line with logN<logN_obs. 
-    
-    (the minimum logN absorbers is placed at a random redshift between
-    the original redshift and the redshift of the second minimum logN
-    absorber).
-    
-    """
-    from astro.sampledist import RanDist
-    
-    absreal.sort(order='LOGN') #np.recarray.sort()
-    absrand = absreal.repeat(Nrand)
-    Ckms  = 299792.458
-    DVkms = 2500.
-    for i in xrange(len(absreal)):
-        if i == 0:
-            zmin  = np.min([absreal.ZABS[i],absreal.ZABS[i+1]])
-            zmax  = np.max([absreal.ZABS[i],absreal.ZABS[i+1]])
-        else:
-            cond  = absreal.LOGN <= absreal.LOGN[i]
-            zmin  = np.min(absreal.ZABS[cond])
-            zmax  = np.max(absreal.ZABS[cond])
-        zrand = np.random.uniform(zmin,zmax,Nrand)
-        absrand.ZABS[i*Nrand:(i+1)*Nrand] = zrand
-    return absrand
-
-def logN_b_to_Wr(logN,b,ion='HI'):
-    if ion=='HI':
-        #assuming linear part of COG
-        return (10**logN)/(1.84*10**14) #W in Angstroms.
-    
-
-
-def random_abs(absreal,Nrand,wa,er,sl=5,R=20000,ion='HI'):
+def random_abs(absreal,Nrand,wa,er,sl=3,R=20000,ion='HI'):
     """From a real absorber catalog it creates a random catalog.  For
     a given real absorber with (z_obs,logN_obs,b_obs) it places it at
     a new z_rand, defined by where the line could have been
@@ -101,7 +43,7 @@ def random_abs(absreal,Nrand,wa,er,sl=5,R=20000,ion='HI'):
     
     er   = np.where(er==0,1e10,er)
     er   = np.where(np.isnan(er),1e10,er)
-    Wmin = sl*w0*er/R  #sl*wa*er / (1. + z) / R
+    Wmin = 3*sl*w0*er/R  #3*sl*wa*er / (1. + z) / R
     Wmin = gf(Wmin.astype(float),10) # smoothed version 
     
     for i in xrange(len(absreal)):
@@ -114,70 +56,6 @@ def random_abs(absreal,Nrand,wa,er,sl=5,R=20000,ion='HI'):
     return absrand 
 
       
-def random_gal2(galreal,Nrand):
-    """From a real galaxy catalog, it creates a random catalog. For a
-    given real galaxy with zgal,RA,DEC (and other properties), it
-    creates Nrand new random galaxies at (RA,DEC) chosen from the rest
-    of the galaxies randomly, it also randomizes zgal to be equal to
-    zrand = another galaxy z + Dv coming from a P(v) around z (improve
-    description)"""
-    
-    #np.random.seed(24)
-    galrand=galreal.repeat(Nrand)
-    Ckms   = 299792.458
-    DVkms  = 5000.
-    for i in xrange(len(galreal)):
-        while True:
-            integer_random1 = np.random.randint(0,len(galreal),Nrand) #for zrand
-            integer_random2 = np.random.randint(0,len(galreal),Nrand) #for RA,DEC
-            equal = (integer_random1 == i) | (integer_random2==i)
-            if np.sum(equal)==0: #make sure that galaxy i is not taken 
-                break 
-        zrand   = galreal.ZGAL[integer_random1]
-        #Use an extra displacement at the new random redshift
-        zrand   = zrand + extra_dv(DVkms,DVkms,size=Nrand)*(1+zrand)/Ckms
-        RArand  = galreal.RA[integer_random2]
-        DECrand = galreal.DEC[integer_random2]
-        galrand.ZGAL[i*Nrand:(i+1)*Nrand] = zrand
-        galrand.RA[i*Nrand:(i+1)*Nrand]   = RArand
-        galrand.DEC[i*Nrand:(i+1)*Nrand]  = DECrand
-    return galrand
-        
-def random_gal3(galreal,Nrand):
-    """From a real galaxy catalog, it creates a random catalog. For a
-    given real galaxy with zgal,RA,DEC (and other properties), it
-    creates Nrand new random galaxies at (RA,DEC) chosen from the rest
-    of the galaxies randomly, it also randomizes zgal to be equal to
-    zrand= another galaxy z but excluding a velocity range from the
-    original (improve description)"""
-    from astro.sampledist import RanDist
-
-    galrand=galreal.repeat(Nrand)
-    Ckms   = 299792.458
-    DVkms  = 10000. #dv of exclussion
-    
-    for i in xrange(len(galreal)):
-        #cond = np.fabs(galreal.ZGAL-galreal.ZGAL[i]) * Ckms /(1. + galreal.ZGAL[i])>0*DVkms
-        cond = (galreal.MAG > 0) & (galreal.MAG < 90) & (galreal.MAG<=galreal.MAG[i])
-        
-        if np.sum(cond)>0:
-            auxz = galreal.ZGAL[cond]
-            integer_random1 = np.random.randint(0,len(auxz),Nrand) #for zrand
-            zrand   = auxz[integer_random1]
-            #zrand   = zrand + extra_dv(DVkms,DVkms,size=Nrand)*(1+zrand)/Ckms
-            zrand = zrand + np.random.uniform(-DVkms/2,DVkms/2,size=Nrand)*(1+zrand)/Ckms
-        else:
-            zrand = galreal.ZGAL[i]
-            zrand = zrand + np.random.uniform(-DVkms/2,DVkms/2,size=Nrand)*(1+zrand)/Ckms
-
-        integer_random2 = np.random.randint(0,len(galreal),Nrand) #for RA,DEC  
-        RArand  = galreal.RA[integer_random2]
-        DECrand = galreal.DEC[integer_random2]
-        galrand.ZGAL[i*Nrand:(i+1)*Nrand] = zrand
-        galrand.RA[i*Nrand:(i+1)*Nrand]   = RArand
-        galrand.DEC[i*Nrand:(i+1)*Nrand]  = DECrand
-    return galrand
-        
 def random_gal(galreal,Nrand,Nmin=10):
     """ Prefered random galaxy generator. For a given galaxy with a
     given magnitude (and other properties), it calculates the redshift
@@ -238,63 +116,6 @@ def random_gal(galreal,Nrand,Nmin=10):
         galrand.DEC[i*Nrand:(i+1)*Nrand]  = DECrand
     return galrand
         
-def random_gal_fit(galreal,Nrand,Nmin=50):
-    """ For a given galaxy with a given magnitude, it calculates the
-    redshift sensitivity function from galaxies brighter than the
-    selected one, and places Nrand new galaxies at a random redshift
-    given by a empirical function (see zgal_function). For extremely
-    bright galaxies (rare) the sensitivity function is calculated from
-    at least Nmin (=50) galaxies. This Nmin should be set to include
-    volume limited galaxies only. [zgal_function still needs to be
-    implemented and so the guesses accordingly.]"""
-    
-    from astro.sampledist import RanDist
-    from astro.fit import InterpCubicSpline
-    from scipy import optimize
-    Ckms  = 299792.458
-    Nmin  = int(Nmin) #minimum number of galaxys for the fit
-    zmin  = 0
-    zmax  = np.max(galreal.ZGAL) + 0.5
-    DZ    = 0.2 #delta z for the histogram for getting the spline in z
-    galreal.sort(order='MAG') #np.recarray.sort()
-    galrand = galreal.repeat(Nrand)
-    
-    for i in xrange(len(galreal)):
-        
-        if i < Nmin: 
-            #import pdb; pdb.set_trace()
-            vals,bins = np.histogram(galreal.ZGAL[:Nmin], bins=np.arange(zmin, zmax, DZ))
-            guess = [np.max(vals),0.7,10.,0.5] # guess parameters for the fit
-            xdata = 0.5*(bins[:-1] + bins[1:])
-            ydata = vals
-            print guess
-            params, params_covariance = optimize.curve_fit(zgal_function,xdata,ydata,guess)
-            print params
-            print ''
-            spl   = InterpCubicSpline(xdata, zgal_function(xdata,params[0],params[1],params[2],params[3]))
-            
-        else:
-            cond = (galreal.MAG > 0) & (galreal.MAG < 90) & (galreal.MAG<=galreal.MAG[i])
-            vals,bins = np.histogram(galreal.ZGAL[cond], bins=np.arange(zmin, zmax, DZ))
-            guess = [np.max(vals),0.7,10.,0.5] # guess parameters for the fit
-            xdata = 0.5*(bins[:-1] + bins[1:])
-            ydata = vals
-            params, params_covariance = optimize.curve_fit(zgal_function,xdata,ydata,guess)
-            spl   = InterpCubicSpline(xdata, zgal_function(xdata,params[0],params[1],params[2],params[3]))
-            
-        rvals     = np.linspace(zmin, zmax, 1e4)
-        rand_z    = RanDist(rvals, spl(rvals))
-        zrand     = rand_z.random(Nrand)
-        
-        integer_random2 = np.random.randint(0,len(galreal),Nrand) #for RA,DEC  
-        RArand  = galreal.RA[integer_random2]
-        DECrand = galreal.DEC[integer_random2]
-        galrand.ZGAL[i*Nrand:(i+1)*Nrand] = zrand
-        galrand.RA[i*Nrand:(i+1)*Nrand]   = RArand
-        galrand.DEC[i*Nrand:(i+1)*Nrand]  = DECrand
-    return galrand
-   
-
 
 class Field:
     """The Field class is meant to contain information from a given
@@ -480,13 +301,13 @@ class Field:
         pl.show()
 
     def plot_zhist_abs(self,logn_min=0,logn_max=25,bs=0.01,normed=True):
-        #pl.clf()
+        pl.clf()
         bins = np.arange(0,1.5,bs)
         cond = (self.absreal.LOGN <logn_max)&(self.absreal.LOGN >=logn_min)
         pl.hist(self.absreal.ZABS[cond],bins,histtype='step',normed=normed)
         cond = (self.absrand.LOGN <logn_max)&(self.absrand.LOGN >=logn_min)
         pl.hist(self.absrand.ZABS[cond],bins,histtype='step',normed=normed)
-        #pl.show()
+        pl.show()
 
     def plot_x(self,bins):
         pl.clf()
