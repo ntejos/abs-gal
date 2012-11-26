@@ -99,12 +99,11 @@ def random_gal(galreal,Nrand,Nmin=10):
                     break
                 else:
                     delta_mag2+=0.1
-                    #print np.sum(cond), delta_mag2, galreal.MAG[i]
             vals,bins = np.histogram(galreal.ZGAL[cond], bins)
             vals      = gf(vals.astype(float),smooth_scale) # smooth the histogram
             spl       = InterpCubicSpline(0.5*(bins[:-1] + bins[1:]), vals.astype(float))
         
-        rvals     = np.linspace(zmin, zmax, 1e4)
+        rvals     = np.linspace(0, zmax, 1e4)
         rand_z    = RanDist(rvals, spl(rvals))
         zrand     = rand_z.random(Nrand)
         
@@ -166,6 +165,9 @@ class Field:
         
         
     def redefine_sample(self,lognmin=0,lognmax=100.,tdist_max=1000):
+        """Redefine the sample getting rid of unwanted
+        information. Useful to reduce computational time when
+        calculating the pair counts."""
         cond = (self.absreal.LOGN >=lognmin) & (self.absreal.LOGN <lognmax) 
         self.absreal = self.absreal[cond]
         cond = (self.absrand.LOGN >=lognmin) & (self.absrand.LOGN <lognmax) 
@@ -228,9 +230,10 @@ class Field:
         self.zar = self.zar / (1. + self.absrand.ZABS)
 
     def addAbs(self, absnew):
-        """Adds a new absorber catalog. It has to be of the same type,
-        i.e., with the same dtype.names than the first ono used to
-        initialize the Field Class."""
+        """Adds a new absorber catalog. It has to be of the same type
+        than the catalog used to initialize the Field Class in the
+        first place, i.e., with the same dtype.names than the first
+        one."""
         self.absreal = np.append(self.absreal,absnew)
         self.absreal = np.rec.array(self.absreal)
         aux          = random_abs(absnew,self.Nabs_rand) 
@@ -243,9 +246,10 @@ class Field:
         self.CDEC    = np.mean(self.absreal.DEC)
         
     def addGal(self, galnew):
-        """Adds a new galaxy catalog. It has to be of the same type,
-        i.e., with the same dtype.names than the first ono used to
-        initialize the Field Class."""
+        """Adds a new galaxy catalog. It has to be of the same type
+        than the catalog used to initialize the Field Class in the
+        first place, i.e., with the same dtype.names than the first
+        one."""
         self.galreal = np.append(self.galreal,galnew)
         self.galreal = np.rec.array(self.galreal)
         aux          = random_gal(galnew,self.Ngal_rand)
@@ -321,7 +325,14 @@ class Field:
         pl.hist(np.hypot(self.ygr,self.zgr),bins,histtype='step',normed=True)
         pl.show()
 
+
 class Survey2D2PCF:
+    """The Class Survey adds many independent fields together. It
+    internally calculates the number of cross- and auto-pairs of data
+    and randoms. It also calculates the 2D2PCF using the Landy & Szalay
+    estimator, and it estimate the uncertainty with a jacknife
+    technique."""
+
     def __init__(self,field,rbinedges,tbinedges):
         self.fields = [field]
         
@@ -332,6 +343,9 @@ class Survey2D2PCF:
         self.DaRg = field.DaRg(rbinedges,tbinedges)
         self.RaDg = field.RaDg(rbinedges,tbinedges)
         self.RaRg = field.RaRg(rbinedges,tbinedges)
+        self.DaDa = field.DaDg(rbinedges,tbinedges)
+        self.DaRa = field.DaDg(rbinedges,tbinedges)
+        self.RaRa = field.DaDg(rbinedges,tbinedges)
         #self.get_xi_1D()
         
         self.rbinedges = rbinedges
@@ -347,7 +361,10 @@ class Survey2D2PCF:
         self.DaRg += field.DaRg(self.rbinedges,self.tbinedges)
         self.RaDg += field.RaDg(self.rbinedges,self.tbinedges)
         self.RaRg += field.RaRg(self.rbinedges,self.tbinedges)
-        
+        self.DaDa += field.DaDa(self.rbinedges,self.tbinedges)
+        self.DaRa += field.DaRa(self.rbinedges,self.tbinedges)
+        self.RaRg += field.RaRa(self.rbinedges,self.tbinedges)
+
     def get_xi_1D(self):
         self.DgDg_1D = np.array([np.sum(self.DgDg.T[i]) for i in range(len(self.DgDg[0]))])
         self.DgRg_1D = np.array([np.sum(self.DgRg.T[i]) for i in range(len(self.DgRg[0]))])
@@ -356,9 +373,10 @@ class Survey2D2PCF:
         self.DaRg_1D = np.array([np.sum(self.DaRg.T[i]) for i in range(len(self.DaRg[0]))])
         self.RaDg_1D = np.array([np.sum(self.RaDg.T[i]) for i in range(len(self.RaDg[0]))])
         self.RaRg_1D = np.array([np.sum(self.RaRg.T[i]) for i in range(len(self.RaRg[0]))])
+        self.DaDa_1D = np.array([np.sum(self.DaDa.T[i]) for i in range(len(self.DaDa[0]))])
+        self.DaRa_1D = np.array([np.sum(self.DaRa.T[i]) for i in range(len(self.DaRa[0]))])
+        self.RaRa_1D = np.array([np.sum(self.RaRa.T[i]) for i in range(len(self.RaRa[0]))])
         
-
-
     def xi_ag_LS(self,sigma=0,jacknife=True,f1=None,f2=None,f3=None):
         """ Returns the abs-gal 2D2PCF using Landy & Szalay
         estimator. It smooths the pair-pair counts with a Gaussian
@@ -386,9 +404,6 @@ class Survey2D2PCF:
             err_Wjk = (N - 1.) / N * err_Wjk
             err_Wjk = np.sqrt(err_Wjk)
         return Wag, err_Wjk
-    
-
-
 
     def xi_gg_LS(self,sigma=0,jacknife=True,f1=None,f2=None,f3=None):
         from pyntejos.xcorr.xcorr import W3
@@ -410,5 +425,3 @@ class Survey2D2PCF:
             err_W3jk = (N - 1.) / N * err_W3jk
             err_W3jk = np.sqrt(err_W3jk)
         return W3gg, err_W3jk
-
-    
