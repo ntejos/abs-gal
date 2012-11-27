@@ -3,6 +3,13 @@ import random
 from astro.cosmology import Cosmology,PC,to_xyz
 import pylab as pl
 
+def logN_b_to_Wr(logN,b,ion='HI'):
+    if ion=='HI':
+        #assuming linear part of COG
+        return (10**logN)/(1.84*10**14) #W in Angstroms.
+    
+
+
 def random_abs(absreal,Nrand,wa,er,sl=3,R=20000,ion='HI'):
     """From a real absorber catalog it creates a random catalog.  For
     a given real absorber with (z_obs,logN_obs,b_obs) it places it at
