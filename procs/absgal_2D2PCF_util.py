@@ -3,14 +3,14 @@ import random
 from astro.cosmology import Cosmology,PC,to_xyz
 import pylab as pl
 
+
 def logN_b_to_Wr(logN,b,ion='HI'):
     if ion=='HI':
         #assuming linear part of COG
         return (10**logN)/(1.84*10**14) #W in Angstroms.
     
 
-
-def random_abs(absreal,Nrand,wa,er,sl=3,R=20000,ion='HI'):
+def random_abs(absreal,Nrand,wa,fl,er,sl=1.,R=20000,ion='HI'):
     """From a real absorber catalog it creates a random catalog.  For
     a given real absorber with (z_obs,logN_obs,b_obs) it places it at
     a new z_rand, defined by where the line could have been
@@ -20,7 +20,8 @@ def random_abs(absreal,Nrand,wa,er,sl=3,R=20000,ion='HI'):
     ---
     absreal: numpy rec array with the absorber catalog.
     Nrand:   number of random lines per real one generated (integer).
-    wa:      numpy array of wavelenght covered by the spectrum.  
+    wa:      numpy array of wavelenght covered by the spectrum.
+    fl:      numpy array of normalized flux.
     er:      numpy array of error in the normalized flux of the spectrum for 
              a given wavelenght.
     sl:      significance level for the detection of the absorption line.
@@ -38,24 +39,32 @@ def random_abs(absreal,Nrand,wa,er,sl=3,R=20000,ion='HI'):
     the same properties as the given one accordingly.
     """
     from astro.sampledist import RanDist
-    from scipy.ndimage import gaussian_filter as gf
+    from scipy.ndimage import uniform_filter as uf
+    from astro.fit import InterpCubicSpline
     
     absreal.sort(order='LOGN') #np.recarray.sort() sorted by column density
     Nrand   = int(Nrand)
     absrand = absreal.repeat(Nrand)
     Ckms  = 299792.458
     if ion=='HI':
-        w0    = 1215.67  # HI w0 in angstroms
-    z     = wa/w0 - 1.   # spectrum in z coordinates
+        w0 = 1215.67  # HI w0 in angstroms
+    z = wa/w0 - 1.   # spectrum in z coordinates
     
-    er   = np.where(er==0,1e10,er)
-    er   = np.where(np.isnan(er),1e10,er)
-    Wmin = 3*sl*w0*er/R  #3*sl*wa*er / (1. + z) / R
-    Wmin = gf(Wmin.astype(float),10) # smoothed version 
+    Wmin = 3.*sl*w0*er/R/fl  #{1-10}*sl*wa / (1. + z) / R / (S/N)
+    Wmin = np.where(Wmin<=0,1e10,Wmin)
+    Wmin = np.where(np.isnan(Wmin),1e10,Wmin)
+    Wmin = np.where(np.isinf(Wmin),1e10,Wmin)
+    Wmin = uf(Wmin.astype(float),10.) # smoothed version (uniform is better than gaussian) 
     
     for i in xrange(len(absreal)):
+        if absreal.ZABS[i]>np.max(z): # lines that were observed through Lyb or higher
+            continue 
+        
         Wr     = logN_b_to_Wr(absreal.LOGN[i],absreal.B[i],ion='HI')
         zgood  = (Wr > Wmin) & (z>0)
+        assert np.sum(zgood)>0, \
+            'There are not regions in the spectrum with Wmin<%s A. Addjust significance.' %(Wr)
+        
         rand_z = RanDist(z, zgood*1.)
         zrand  = rand_z.random(Nrand)
         absrand.ZABS[i*Nrand:(i+1)*Nrand] = zrand
@@ -63,7 +72,7 @@ def random_abs(absreal,Nrand,wa,er,sl=3,R=20000,ion='HI'):
     return absrand 
 
       
-def random_gal(galreal,Nrand,Nmin=10):
+def random_gal(galreal,Nrand,Nmin=20):
     """ Prefered random galaxy generator. For a given galaxy with a
     given magnitude (and other properties), it calculates the redshift
     sensitivity function from galaxies in a magnitude band around the
@@ -82,7 +91,7 @@ def random_gal(galreal,Nrand,Nmin=10):
     Nmin  = int(Nmin)  #minimum number of galaxys for the fit
     zmin  = np.min(galreal.ZGAL)
     zmax  = np.max(galreal.ZGAL) + 0.1
-    DZ    = 0.01       #delta z for the histogram for getting the spline in z
+    DZ    = 0.01     #delta z for the histogram for getting the spline in z
     smooth_scale = 10. #smoothing scale for the histogram (in number
                        #of bins, so depends on DZ)
     galreal.sort(order='MAG') #np.recarray.sort()
@@ -135,7 +144,9 @@ class Field:
     galreal:   catalog of real galaxies (numpy rec array). It has to have
                dtype.names RA, DEC, ZGAL, MAG  
     wa:        numpy array with QSO spectral coverage
-    er:        numpy array with the normalized QSO spectrum error
+    fl:        numpy aray with the QSO spectrum (it can be normalized or not)
+    er:        numpy array with the QSO spectrum error (it can be normalized
+               or not, but has to be consistent with fl)
     R:         resolution of the QSO spectrum spectrograph
     Ngal_rand: number of random galaxies per real one that will be created.
     Nabs_rand: number of random absorbers per real one that will be created.
@@ -155,13 +166,15 @@ class Field:
     implemented plots that are useful to check for possible problems.
 
     """
-    def __init__(self, absreal,galreal,wa,er,R=20000,Ngal_rand=10,Nabs_rand=1000,proper=False):
+    def __init__(self, absreal,galreal,wa,fl,er,R=20000,Ngal_rand=10,Nabs_rand=1000,proper=False):
         self.absreal   = absreal   #np array with absorber properties (single ion)
         self.galreal   = galreal   #np array with galaxy properties
-        self.wa        = wa        
+        self.wa        = wa
+        self.fl        = fl
+        self.er        = er
         self.Ngal_rand = Ngal_rand #Ngal_rand x len(galreal) = NRANDOM (Gal)
         self.Nabs_rand = Nabs_rand #Nabs_rand x len(absreal) = NRANDOM (Abs)
-        self.absrand   = random_abs(self.absreal,self.Nabs_rand,wa,er,R=R)
+        self.absrand   = random_abs(self.absreal,self.Nabs_rand,wa,fl,er,R=R)
         self.galrand   = random_gal(self.galreal,self.Ngal_rand)
         self.CRA       = np.mean(self.absreal.RA)
         self.CDEC      = np.mean(self.absreal.DEC)
@@ -236,14 +249,14 @@ class Field:
         self.yar = self.yar / (1. + self.absrand.ZABS)
         self.zar = self.zar / (1. + self.absrand.ZABS)
 
-    def addAbs(self, absnew):
+    def addAbs(self, absnew,wa,fl,er,R=20000):
         """Adds a new absorber catalog. It has to be of the same type
         than the catalog used to initialize the Field Class in the
         first place, i.e., with the same dtype.names than the first
         one."""
         self.absreal = np.append(self.absreal,absnew)
         self.absreal = np.rec.array(self.absreal)
-        aux          = random_abs(absnew,self.Nabs_rand) 
+        aux          = random_abs(absnew,wa,fl,er,R,self.Nabs_rand) 
         self.absrand = np.append(self.absrand,aux)
         self.absrand = np.rec.array(self.absrand)
         self.XYZ()
