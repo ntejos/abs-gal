@@ -14,8 +14,8 @@ wlya = 1215.6701
 cosmo = Cosmology(H0=70., Om=0.3, Ol=0.7)
 
 #Randoms
-Ngal_rand = 20.
-Nabs_rand = 500.
+Ngal_rand = 0.
+Nabs_rand = 1000.
 
 # lower edge of smallest bin, bin width, and number of bins
 # in comoving Mpc. For radial bins
@@ -108,7 +108,7 @@ VIMOSF1005 = galaxies[3]
 VIMOSF1022 = galaxies[4]   
 
 #define fields
-F1005 = Field(q1005,VIMOSF1005,q1005_fuv.wa,q1005_fuv.er,Ngal_rand=Ngal_rand,Nabs_rand=Nabs_rand)
+F1005 = Field(q1005,VVDSF10,q1005_fuv.wa,q1005_fuv.fl,q1005_fuv.er,Ngal_rand=Ngal_rand,Nabs_rand=Nabs_rand)
 
 
 #redefine the samples

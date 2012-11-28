@@ -8,9 +8,35 @@ def logN_b_to_Wr(logN,b,ion='HI'):
     if ion=='HI':
         #assuming linear part of COG
         return (10**logN)/(1.84*10**14) #W in Angstroms.
+    if ion=='HILyb':
+        Lya_Lyb_ratio = (1215.67/1025.72)**2 * (0.4164/0.07912)
+        return (10**logN)/(1.84*10**14)/Lya_Lyb_ratio#W in Angstroms.
     
+def compute_Wmin(wa,fl,er,sl=3.,R=20000,FWHM=10,ion='HI'):
+    """For a given spectrum and transition, it computes the minimun
+    rest-frame equivalent width for that transition to be observed. It
+    return a tuple of redshift and Wmin (z,Wmin)"""
+    
+    from scipy.ndimage import uniform_filter as uf
+    
+    wa = np.array(wa)
+    fl = np.array(fl)
+    er = np.array(er)
 
-def random_abs(absreal,Nrand,wa,fl,er,sl=1.,R=20000,ion='HI'):
+    if ion=='HI':
+        w0 = 1215.67  # HI Lya w0 in angstroms
+    if ion=='HILyb':
+        w0 = 1025.72 #HI Lyb w0 in angstroms
+    z = wa/w0 - 1.   # spectrum in z coordinates
+    
+    Wmin = sl*w0*er/R/fl  #sl*wa / (1. + z) / R / (S/N)
+    Wmin = np.where(Wmin<=0,1e10,Wmin)
+    Wmin = np.where(np.isnan(Wmin),1e10,Wmin)
+    Wmin = np.where(np.isinf(Wmin),1e10,Wmin)
+    Wmin = uf(Wmin.astype(float),FWHM) # smoothed version (uniform prefered over gaussian) 
+    return z, Wmin
+
+def random_abs(absreal,Nrand,wa,fl,er,sl=3.,R=20000,FWHM=10.,ion='HI'):
     """From a real absorber catalog it creates a random catalog.  For
     a given real absorber with (z_obs,logN_obs,b_obs) it places it at
     a new z_rand, defined by where the line could have been
@@ -25,11 +51,15 @@ def random_abs(absreal,Nrand,wa,fl,er,sl=1.,R=20000,ion='HI'):
     er:      numpy array of error in the normalized flux of the spectrum for 
              a given wavelenght.
     sl:      significance level for the detection of the absorption line.
+    R:       resolution of the spectrograph, assumed constant
+    FWHM:    Full-width at half maximum in pixels (assumed constant). This 
+             parameter defines the smoothing scale for Wmin. 
+    ion:     Name of the ion. Function only valid for HI so far.
     
     From the error we calculate the Wmin = sl * wa * er / (1+z) / R,
     where z = wa/w0 - 1 (w0 is the rest frame wavelenght of the
     transition) and R is the resolution of the spectrograp. We then
-    smooth Wmin with a boxcar (sharp edges). 
+    smooth Wmin with a boxcar along FWHM pixels. 
     
     For the given absorber we transform (logN_obs,b_obs) to a W_obs assuming 
     linear part of the curve-of-growth. 
@@ -39,28 +69,26 @@ def random_abs(absreal,Nrand,wa,fl,er,sl=1.,R=20000,ion='HI'):
     the same properties as the given one accordingly.
     """
     from astro.sampledist import RanDist
-    from scipy.ndimage import uniform_filter as uf
-    from astro.fit import InterpCubicSpline
-    
+        
     absreal.sort(order='LOGN') #np.recarray.sort() sorted by column density
     Nrand   = int(Nrand)
     absrand = absreal.repeat(Nrand)
     Ckms  = 299792.458
     if ion=='HI':
-        w0 = 1215.67  # HI w0 in angstroms
-    z = wa/w0 - 1.   # spectrum in z coordinates
-    
-    Wmin = 3.*sl*w0*er/R/fl  #{1-10}*sl*wa / (1. + z) / R / (S/N)
-    Wmin = np.where(Wmin<=0,1e10,Wmin)
-    Wmin = np.where(np.isnan(Wmin),1e10,Wmin)
-    Wmin = np.where(np.isinf(Wmin),1e10,Wmin)
-    Wmin = uf(Wmin.astype(float),10.) # smoothed version (uniform is better than gaussian) 
-    
-    for i in xrange(len(absreal)):
-        if absreal.ZABS[i]>np.max(z): # lines that were observed through Lyb or higher
-            continue 
+        z_Lya, Wmin_Lya = compute_Wmin(wa,fl,er,sl=sl,R=R,FWHM=FWHM,ion='HI')
+        z_Lyb, Wmin_Lyb = compute_Wmin(wa,fl,er,sl=sl,R=R,FWHM=FWHM,ion='HILyb')
         
-        Wr     = logN_b_to_Wr(absreal.LOGN[i],absreal.B[i],ion='HI')
+    for i in xrange(len(absreal)):
+        if absreal.ZABS[i]>np.max(z_Lya): # lines that were observed through Lyb
+            Wr   = logN_b_to_Wr(absreal.LOGN[i],absreal.B[i],ion='HILyb')
+            z    = z_Lyb
+            z    = np.where(z=<z_Lya,-1.,z) #mask out region with Lya coverage
+            Wmin = Wmin_Lyb
+        else: #lines that were observed through Lya only
+            Wr   = logN_b_to_Wr(absreal.LOGN[i],absreal.B[i],ion='HI')
+            z    = z_Lya
+            Wmin = Wmin_Lya
+
         zgood  = (Wr > Wmin) & (z>0)
         assert np.sum(zgood)>0, \
             'There are not regions in the spectrum with Wmin<%s A. Addjust significance.' %(Wr)
