@@ -150,13 +150,7 @@ def random_gal(galreal,Nrand,Nmin=20):
         rvals     = np.linspace(0, zmax, 1e4)
         rand_z    = RanDist(rvals, spl(rvals))
         zrand     = rand_z.random(Nrand)
-        
-        integer_random2 = np.random.randint(0,len(galreal),Nrand) #for RA,DEC  
-        RArand  = galreal.RA[integer_random2]
-        DECrand = galreal.DEC[integer_random2]
         galrand.ZGAL[i*Nrand:(i+1)*Nrand] = zrand
-        galrand.RA[i*Nrand:(i+1)*Nrand]   = RArand
-        galrand.DEC[i*Nrand:(i+1)*Nrand]  = DECrand
     return galrand
         
 
