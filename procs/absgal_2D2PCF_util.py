@@ -5,12 +5,47 @@ import pylab as pl
 
 
 def logN_b_to_Wr(logN,b,ion='HI'):
+    """I will use the approximation given by Draine book (eq. 9.27),
+    whic comes from atomic physics considerations + Rodgers & Williams
+    1974 (I couldn't find the reference though)
+    
+    Input units:
+    N is in cm^-2 and b in km/s
+    
+    Output units:
+    Wr in Angstroms
+
+    """
+    Ckms  = 299792.458
+    logN = float(logN)
+    b    = float(b)
     if ion=='HI':
-        #assuming linear part of COG
-        return (10**logN)/(1.84*10**14) #W in Angstroms.
+        N     = 10**logN
+        t0 = 0.7580 * (N/1e13) * (10/b) # dimensionless (N in cm^-2 and b in km/s)
+        if t0 <= 1.25393:
+            W = np.sqrt(np.pi) * (b/Ckms) * t0 / (1 + t0/2/np.sqrt(2)) #dimensionless
+            return 1215.67 * W  # in angstroms
+        else:
+            W = (2*b/Ckms)**2 * np.log(t0/np.log(2.)) \
+                + (b/Ckms)*(7.616/Ckms) * (t0-1.25393)/np.sqrt(np.pi)
+            W = np.sqrt(W)
+            return 1215.67 * W  # in angstroms
+        
     if ion=='HILyb':
-        Lya_Lyb_ratio = (1215.67/1025.72)**2 * (0.4164/0.07912)
-        return (10**logN)/(1.84*10**14)/Lya_Lyb_ratio#W in Angstroms.
+        N     = 10**logN 
+        t0 = 0.7580 * (N/1e13) * (10/b) * (0.07912/0.4164) * (1025.72/1215.67) # dimensionless (N in cm^-2 and b in km/s)
+        if t0 <= 1.25393:
+            W = np.sqrt(np.pi) * (b/Ckms) * t0 / (1 + t0/2/np.sqrt(2)) #dimensionless
+            return 1025.72 * W  # in angstroms
+        else:
+            W = (2*b/Ckms)**2 * np.log(t0/np.log(2.)) \
+                + (b/Ckms)*(1.9458/Ckms) * (t0-1.25393)/np.sqrt(np.pi)
+            W = np.sqrt(W)
+            print 'non-linear part',1215.67 * W, logN,b
+            return 1025.72 * W  # in angstroms
+        
+       
+       
     
 def compute_Wmin(wa,fl,er,sl=3.,R=20000,FWHM=10,ion='HI'):
     """For a given spectrum and transition, it computes the minimun
@@ -82,7 +117,7 @@ def random_abs(absreal,Nrand,wa,fl,er,sl=3.,R=20000,FWHM=10.,ion='HI'):
         if absreal.ZABS[i]>np.max(z_Lya): # lines that were observed through Lyb
             Wr   = logN_b_to_Wr(absreal.LOGN[i],absreal.B[i],ion='HILyb')
             z    = z_Lyb
-            z    = np.where(z=<z_Lya,-1.,z) #mask out region with Lya coverage
+            z    = np.where(z<=z_Lya,-1.,z) #mask out region with Lya coverage
             Wmin = Wmin_Lyb
         else: #lines that were observed through Lya only
             Wr   = logN_b_to_Wr(absreal.LOGN[i],absreal.B[i],ion='HI')
